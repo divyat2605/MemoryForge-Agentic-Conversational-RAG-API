@@ -1,4 +1,3 @@
-
 """
 memory.py — Dual-layer memory for MemoryForge
 
@@ -9,8 +8,10 @@ Long-term  : Redis-persisted message history keyed by session_id
 import json
 import os
 from typing import Optional
+
 import redis.asyncio as aioredis
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
+from memory_summarizer import summarize_history, build_memory_index, semantic_memory_retrieve, score_importance
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379")
 MAX_SHORT_TERM_TURNS = 6          # last 6 turns kept in context
@@ -73,9 +74,40 @@ async def clear_session(session_id: str):
 
 # ---------- short-term (windowed) ----------
 
+
 def get_short_term(history: list[BaseMessage], n_turns: int = MAX_SHORT_TERM_TURNS) -> list[BaseMessage]:
     """
     Return last N turns from history for LLM context window.
     Each turn = 1 human + 1 AI message = 2 items, so slice by n_turns * 2.
     """
     return history[-(n_turns * 2):]
+
+
+# --- Summarization and semantic memory ---
+def get_summarized_history(history: list[BaseMessage], max_tokens: int = 256) -> str:
+    """
+    Return a summary string for long conversation history.
+    """
+    # Convert BaseMessage to dicts
+    turns = []
+    for m in history:
+        role = "human" if isinstance(m, HumanMessage) else "ai"
+        turns.append({"role": role, "content": m.content})
+    return summarize_history(turns, max_tokens=max_tokens)
+
+def get_semantic_memory(history: list[BaseMessage], query: str, top_k: int = 3) -> list[dict]:
+    """
+    Retrieve most relevant past turns to query using embeddings.
+    """
+    turns = []
+    for i, m in enumerate(history):
+        role = "human" if isinstance(m, HumanMessage) else "ai"
+        turns.append({"id": f"turn_{i}", "role": role, "content": m.content, "age": len(history) - i})
+    build_memory_index(turns)
+    return semantic_memory_retrieve(query, top_k=top_k)
+
+def get_memory_importance(turn: dict, query: str = None) -> float:
+    """
+    Score a memory turn for importance (recency + relevance).
+    """
+    return score_importance(turn, query=query)

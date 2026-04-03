@@ -1,3 +1,37 @@
+from fastapi.responses import JSONResponse
+import os
+# ---------- routes ----------
+
+# --- Evaluation results endpoint ---
+@app.get("/eval_results")
+async def eval_results():
+    """Return evaluation metrics from eval_metrics.jsonl."""
+    log_path = os.getenv("EVAL_LOG_PATH", "eval_metrics.jsonl")
+    if not os.path.exists(log_path):
+        return JSONResponse(content={"results": [], "total": 0})
+    with open(log_path) as f:
+        lines = [json.loads(line) for line in f if line.strip()]
+    return {"results": lines, "total": len(lines)}
+
+# --- Memory state inspection endpoint ---
+@app.get("/memory_state/{session_id}")
+async def memory_state(session_id: str):
+    """Return current memory state (full history) for a session."""
+    from memory import load_history
+    history = await load_history(session_id)
+    return {"session_id": session_id, "history": [m.content for m in history], "turns": len(history)}
+
+# --- Debug mode: trace agent decisions ---
+@app.get("/debug/trace")
+async def debug_trace():
+    """Return recent structured logs for agent node traces."""
+    log_path = os.getenv("AGENT_LOG_PATH", "agent_structured.log")
+    if not os.path.exists(log_path):
+        return JSONResponse(content={"trace": [], "total": 0})
+    with open(log_path) as f:
+        lines = [json.loads(line) for line in f if line.strip()]
+    # Return last 50 traces
+    return {"trace": lines[-50:], "total": len(lines)}
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel

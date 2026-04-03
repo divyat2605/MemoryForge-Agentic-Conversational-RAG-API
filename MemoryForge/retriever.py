@@ -6,11 +6,13 @@ for Elasticsearch which has BM25 built-in and handles distributed
 search natively — zero change needed to the metadata filtering logic.
 """
 
+
 import pickle
 import os
 from typing import List, Optional
 from rank_bm25 import BM25Okapi
 import threading
+from dense_retriever import build_dense_index, hybrid_retrieve
 
 # ---------- in-memory store ----------
 _lock = threading.Lock()
@@ -54,35 +56,33 @@ _load_index()
 # ---------- public API ----------
 
 def add_documents_to_index(docs: list[dict]):
-    """Add new docs to BM25 index. Thread-safe."""
+    """Add new docs to BM25 and dense index. Thread-safe."""
     with _lock:
         existing_ids = {d["id"] for d in _documents}
         new_docs = [d for d in docs if d["id"] not in existing_ids]
         _documents.extend(new_docs)
         _rebuild_index()
         _save_index()
+        # Also update dense index
+        build_dense_index(_documents)
 
 
 def retrieve(
     query: str,
     top_k: int = 5,
     filters: Optional[dict] = None,
+    hybrid: bool = True,
 ) -> list[dict]:
     """
-    BM25 retrieval with optional metadata filtering.
-
-    filters example:
-        {"year": "2023", "topics": "rag", "author": "Vaswani"}
-
-    For scale to 1M docs:
-        Replace BM25Okapi with Elasticsearch query:
-        es.search(index="docs", query={"bool": {"must": [{"match": {"text": query}}], "filter": [...metadata filters]}})
+    Hybrid retrieval (BM25 + dense) with reranking. Set hybrid=False for BM25 only.
     """
     with _lock:
         if not _documents or _bm25_index is None:
             return []
-
-        # --- metadata pre-filter ---
+        if hybrid:
+            return hybrid_retrieve(query, top_k=top_k, filters=filters, bm25_fn=lambda q, top_k, filters: retrieve(q, top_k, filters, hybrid=False))
+        # --- BM25 only ---
+        # ...existing code for BM25 retrieval...
         if filters:
             candidate_docs = []
             candidate_indices = []
@@ -94,7 +94,6 @@ def retrieve(
                     if doc_val is None:
                         match = False
                         break
-                    # support list values (e.g. topics: ["rag", "llm"])
                     if isinstance(doc_val, list):
                         if val not in doc_val:
                             match = False
@@ -113,13 +112,11 @@ def retrieve(
         if not candidate_docs:
             return []
 
-        # --- BM25 scoring on candidates ---
         tokenized_query = _tokenize(query)
         candidate_corpus = [_tokenize(doc["text"]) for doc in candidate_docs]
         local_bm25 = BM25Okapi(candidate_corpus)
         scores = local_bm25.get_scores(tokenized_query)
 
-        # sort by score
         ranked = sorted(
             zip(scores, candidate_docs),
             key=lambda x: x[0],

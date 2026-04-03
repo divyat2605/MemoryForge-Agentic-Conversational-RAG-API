@@ -20,11 +20,13 @@ from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage
 from langgraph.graph import StateGraph, END, START
 from langgraph.prebuilt import ToolNode
 
+
 from retriever import retrieve
 from compressor import compress_context
 from mcp_tools import get_tools
-from memory import load_history, append_turn, get_short_term
+from memory import load_history, append_turn, get_short_term, get_summarized_history, get_semantic_memory, get_memory_importance
 from monitoring import traceable
+from decision import decision_node
 
 
 # ---------- state ----------
@@ -55,34 +57,64 @@ def get_llm():
 
 @traceable(name="retrieve_node")
 def retrieve_node(state: AgentState) -> AgentState:
-    """BM25 retrieval with metadata filtering."""
-    chunks = retrieve(
-        query=state["query"],
-        top_k=state["top_k"],
-        filters=state.get("filters"),
-    )
-    return {**state, "retrieved_chunks": chunks}
+    """BM25/hybrid retrieval with metadata filtering. Handles retrieval failure."""
+    try:
+        chunks = retrieve(
+            query=state["query"],
+            top_k=state["top_k"],
+            filters=state.get("filters"),
+        )
+        if not chunks:
+            # Fallback: mark for tool/arxiv fallback
+            state = dict(state)
+            state["retrieved_chunks"] = []
+            state["retrieval_failed"] = True
+            return state
+        return {**state, "retrieved_chunks": chunks, "retrieval_failed": False}
+    except Exception as e:
+        # Log error, fallback
+        state = dict(state)
+        state["retrieved_chunks"] = []
+        state["retrieval_failed"] = True
+        state["retrieval_error"] = str(e)
+        return state
 
 
 @traceable(name="compress_node")
 def compress_node(state: AgentState) -> AgentState:
-    """LLMLingua context compression."""
+    """LLMLingua context compression. Handles compression failure and empty context."""
     if not state["retrieved_chunks"]:
+        # If retrieval failed, fallback message
+        if state.get("retrieval_failed"):
+            return {**state, "compressed_context": "No relevant documents found. Fallback to external tools if available."}
         return {**state, "compressed_context": "No relevant documents found in the index."}
-
-    compressed = compress_context(state["retrieved_chunks"], state["query"])
-    return {**state, "compressed_context": compressed}
+    try:
+        compressed = compress_context(state["retrieved_chunks"], state["query"])
+        # Check if compression removed all context
+        if not compressed or len(compressed.strip()) < 10:
+            return {**state, "compressed_context": "Compression removed all key context. Please try rephrasing or use external tools."}
+        return {**state, "compressed_context": compressed}
+    except Exception as e:
+        return {**state, "compressed_context": f"Compression failed: {str(e)}"}
 
 
 @traceable(name="generate_node")
 def generate_node(state: AgentState) -> AgentState:
     """LLM generation with compressed context + MCP tools available."""
+    import time
+    t0 = time.time()
     llm = get_llm()
+
+    # --- Memory summarization and semantic memory ---
+    full_history = state.get("chat_history", [])
+    summarized = get_summarized_history(full_history, max_tokens=256) if full_history else ""
+    semantic_turns = get_semantic_memory(full_history, state["query"], top_k=2) if full_history else []
+    semantic_context = "\n".join([f"{t['role']}: {t['content']}" for t in semantic_turns])
 
     system_prompt = """You are MemoryForge, an expert research assistant specializing in academic papers.
 
 Answer the user's question using the provided context from retrieved research documents.
-You also have access to the recent conversation history — use it to resolve references like "this", "it", "that paper" etc.
+You also have access to a summary and semantic memory of the recent conversation history — use it to resolve references like "this", "it", "that paper" etc.
 If the context is insufficient, you may use the available tools (search_arxiv, fetch_paper_abstract) to find additional information.
 
 Guidelines:
@@ -98,6 +130,12 @@ Guidelines:
 {state['compressed_context']}
 ---
 
+Conversation summary:
+{summarized}
+
+Relevant past turns:
+{semantic_context}
+
 Question: {state['query']}"""
 
     messages = [SystemMessage(content=system_prompt)]
@@ -105,9 +143,22 @@ Question: {state['query']}"""
     messages.append(HumanMessage(content=user_message))
 
     response = llm.invoke(messages)
+    latency = time.time() - t0
+    from structured_log import log_event
+    log_event({
+        "node": "generate",
+        "token_usage": getattr(response, "usage", None),
+        "latency": latency,
+        "decision_path": {
+            "decision_route": state.get("decision_route"),
+            "retrieval_failed": state.get("retrieval_failed"),
+            "use_arxiv_tool": state.get("use_arxiv_tool"),
+        },
+    })
 
-    sources = [
-        {
+    sources = []
+    for c in state["retrieved_chunks"]:
+        src = {
             "id": c["id"],
             "source": c["metadata"].get("source", "unknown"),
             "score": c["score"],
@@ -115,8 +166,9 @@ Question: {state['query']}"""
             "author": c["metadata"].get("author"),
             "topics": c["metadata"].get("topics", []),
         }
-        for c in state["retrieved_chunks"]
-    ]
+        if "rerank_score" in c:
+            src["rerank_score"] = c["rerank_score"]
+        sources.append(src)
 
     return {
         **state,
@@ -127,16 +179,44 @@ Question: {state['query']}"""
 
 # ---------- graph ----------
 
+
+def arxiv_tool_node(state: AgentState) -> AgentState:
+    """Node for arxiv/tool fallback. Handles tool failure gracefully."""
+    state = dict(state)
+    try:
+        # Mark that arxiv/tool should be used in generate_node
+        state["use_arxiv_tool"] = True
+        state["arxiv_tool_failed"] = False
+        return state
+    except Exception as e:
+        state["use_arxiv_tool"] = False
+        state["arxiv_tool_failed"] = True
+        state["arxiv_tool_error"] = str(e)
+        return state
+
 def build_graph():
     graph = StateGraph(AgentState)
 
+    graph.add_node("decision", decision_node)
     graph.add_node("retrieve", retrieve_node)
+    graph.add_node("arxiv_tool", arxiv_tool_node)
     graph.add_node("compress", compress_node)
     graph.add_node("generate", generate_node)
     graph.add_node("tools", ToolNode(get_tools()))
 
-    graph.add_edge(START, "retrieve")
+    # Routing: decision_node decides which retrieval path to take
+    graph.add_edge(START, "decision")
+    graph.add_conditional_edges(
+        "decision",
+        lambda state: state.get("decision_route", "bm25"),
+        {
+            "bm25": "retrieve",
+            "arxiv": "arxiv_tool",
+            "none": "compress",  # skip retrieval, compress empty context
+        },
+    )
     graph.add_edge("retrieve", "compress")
+    graph.add_edge("arxiv_tool", "compress")
     graph.add_edge("compress", "generate")
     graph.add_edge("generate", END)
 

@@ -41,6 +41,57 @@ POST /ingest → Redis Queue → Worker → BM25 Index (persisted to disk)
 
 ---
 
+## Architecture Diagram
+
+### Agentic RAG Flow
+
+![MemoryForge Architecture](#)
+
+```
+flowchart TD
+    A[User Query / API Call] --> B[LangGraph Agent]
+    B --> C{Decision Node}
+    C -- Retrieval Needed? --> D[BM25 + Dense Hybrid Retrieval]
+    C -- Use External Tool? --> E[MCP Tool (arXiv)]
+    D --> F[LLMLingua Compression]
+    E --> F
+    F --> G[LLM Generation]
+    G --> H[Answer + Sources]
+    B --> I[Memory: Redis (short/long-term)]
+    I --> B
+    subgraph Observability
+      G --> J[LangSmith / OpenTelemetry]
+      D --> J
+      F --> J
+      C --> J
+    end
+```
+
+### Decision Flow & Fallbacks
+
+```
+flowchart TD
+    Q[User Query] --> D{Decision Node}
+    D -- "No Retrieval" --> G[LLM Generation]
+    D -- "BM25/Dense" --> R[Hybrid Retrieval]
+    D -- "arXiv" --> T[MCP Tool]
+    R --> C[Compression]
+    T --> C
+    C --> G
+    G --> A[Answer]
+    subgraph Memory
+      M[Short/Long-term Memory]
+      G --> M
+      M --> D
+    end
+    subgraph Fallbacks
+      R -- "No Docs" --> T
+      C -- "Compression Fail" --> T
+    end
+```
+
+---
+
 ## Stack
 
 | Layer | Technology | Why |
