@@ -173,7 +173,6 @@ Current implementation uses in-memory BM25 (`rank_bm25`).
 | API throughput | single FastAPI instance | `docker compose up --scale app=3` |
 | Ingestion speed | Redis queue (already async) | increase worker replicas |
 
-**Interview answer:** *"Current impl uses rank_bm25 — for 1M docs I'd swap to Elasticsearch which has BM25 built-in and handles distributed search natively. The retrieval interface doesn't change, just the backend. Qdrant is already in docker-compose for hybrid search when needed."*
 
 ---
 
@@ -198,25 +197,7 @@ MemoryForge/
 └── README.md
 ```
 
----
 
-## Environment Variables
-
-```env
-# required
-OPENAI_API_KEY=sk-...
-
-# observability (optional but recommended)
-LANGCHAIN_API_KEY=ls__...
-LANGCHAIN_TRACING_V2=true
-LANGCHAIN_PROJECT=memoryforge
-
-# redis
-REDIS_URL=redis://redis:6379
-
-# qdrant
-QDRANT_URL=http://qdrant:6333
-```
 
 ---
 
