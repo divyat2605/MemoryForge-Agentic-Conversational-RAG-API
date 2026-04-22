@@ -26,18 +26,6 @@
 
 ---
 
-## 📽️ Demo
-
-> **To add your demo:** Record a screen capture of the API in action (e.g. using [Loom](https://loom.com), [Kap](https://getkap.co), or `ffmpeg`), convert to GIF, and replace the line below.
-
-```
-![MemoryForge Demo](assets/demo.gif)
-```
-
-*Suggested flow to record: ingest a PDF → run a query → follow-up query showing memory in action → show LangSmith trace.*
-
----
-
 ## ✨ What is MemoryForge?
 
 MemoryForge is an **agentic RAG API** that answers questions about research documents — not with a fixed retrieve-then-generate chain, but with a **LangGraph state machine** that:
