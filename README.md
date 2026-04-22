@@ -1,26 +1,55 @@
-# MemoryForge 🔍
+<div align="center">
 
-**Production-grade Agentic Conversational RAG API for Research Documents**
+# 🔍 MemoryForge
 
-![Python](https://img.shields.io/badge/Python-3.11+-blue?style=flat-square)
-![FastAPI](https://img.shields.io/badge/FastAPI-async-green?style=flat-square)
-![LangGraph](https://img.shields.io/badge/LangGraph-agentic-purple?style=flat-square)
-![Docker](https://img.shields.io/badge/Docker-compose-blue?style=flat-square)
-![License](https://img.shields.io/badge/License-Apache%202.0-orange?style=flat-square)
+### Production-grade Agentic Conversational RAG API for Research Documents
 
-> Built with LangChain · LangGraph · BM25 · LLMLingua · MCP Tools · LangSmith · FastAPI · Docker · Redis · Qdrant
+<br/>
+
+[![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-async-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![LangGraph](https://img.shields.io/badge/LangGraph-agentic-7C3AED?style=for-the-badge&logo=chainlink&logoColor=white)](https://langchain-ai.github.io/langgraph/)
+[![Docker](https://img.shields.io/badge/Docker-compose-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://docker.com)
+[![Redis](https://img.shields.io/badge/Redis-dual--layer-DC382D?style=for-the-badge&logo=redis&logoColor=white)](https://redis.io)
+[![Qdrant](https://img.shields.io/badge/Qdrant-vector--store-FF4785?style=for-the-badge&logo=qdrant&logoColor=white)](https://qdrant.tech)
+[![License](https://img.shields.io/badge/License-Apache%202.0-F97316?style=for-the-badge)](LICENSE)
+
+<br/>
+
+**Feed it PDFs. Ask questions. It remembers what you asked before.**
+
+<br/>
+
+> Built with `LangChain` · `LangGraph` · `BM25` · `LLMLingua` · `MCP Tools` · `LangSmith` · `FastAPI` · `Docker` · `Redis` · `Qdrant`
+
+</div>
 
 ---
 
-## What is MemoryForge?
+## 📽️ Demo
 
-MemoryForge is an **agentic RAG API** that answers questions about research documents — not with a fixed retrieve-then-generate chain, but with a **LangGraph state machine** that decides retrieval strategy, compresses context, calls external tools when needed, and remembers conversation history across sessions.
+> **To add your demo:** Record a screen capture of the API in action (e.g. using [Loom](https://loom.com), [Kap](https://getkap.co), or `ffmpeg`), convert to GIF, and replace the line below.
 
-Feed it PDFs. Ask questions. It remembers what you asked before.
+```
+![MemoryForge Demo](assets/demo.gif)
+```
+
+*Suggested flow to record: ingest a PDF → run a query → follow-up query showing memory in action → show LangSmith trace.*
 
 ---
 
-## Architecture
+## ✨ What is MemoryForge?
+
+MemoryForge is an **agentic RAG API** that answers questions about research documents — not with a fixed retrieve-then-generate chain, but with a **LangGraph state machine** that:
+
+- 🧠 **Decides** retrieval strategy per query (BM25, dense, or external tool)
+- ✂️ **Compresses** context up to 6× before hitting the LLM
+- 🌐 **Falls back** to live arXiv search when local index is insufficient
+- 💾 **Remembers** full conversation history across sessions via Redis
+
+---
+
+## 🏗️ Architecture
 
 ```
 User Query → FastAPI
@@ -41,23 +70,21 @@ POST /ingest → Redis Queue → Worker → BM25 Index (persisted to disk)
 
 ---
 
-## Architecture Diagram
+## 🔀 Architecture Diagrams
 
 ### Agentic RAG Flow
 
-![MemoryForge Architecture](#)
-
-```
+```mermaid
 flowchart TD
     A[User Query / API Call] --> B[LangGraph Agent]
     B --> C{Decision Node}
     C -- Retrieval Needed? --> D[BM25 + Dense Hybrid Retrieval]
-    C -- Use External Tool? --> E[MCP Tool (arXiv)]
+    C -- Use External Tool? --> E[MCP Tool - arXiv]
     D --> F[LLMLingua Compression]
     E --> F
     F --> G[LLM Generation]
     G --> H[Answer + Sources]
-    B --> I[Memory: Redis (short/long-term)]
+    B --> I[Memory: Redis - short/long-term]
     I --> B
     subgraph Observability
       G --> J[LangSmith / OpenTelemetry]
@@ -69,12 +96,12 @@ flowchart TD
 
 ### Decision Flow & Fallbacks
 
-```
+```mermaid
 flowchart TD
     Q[User Query] --> D{Decision Node}
-    D -- "No Retrieval" --> G[LLM Generation]
-    D -- "BM25/Dense" --> R[Hybrid Retrieval]
-    D -- "arXiv" --> T[MCP Tool]
+    D -- No Retrieval --> G[LLM Generation]
+    D -- BM25/Dense --> R[Hybrid Retrieval]
+    D -- arXiv --> T[MCP Tool]
     R --> C[Compression]
     T --> C
     C --> G
@@ -85,50 +112,53 @@ flowchart TD
       M --> D
     end
     subgraph Fallbacks
-      R -- "No Docs" --> T
-      C -- "Compression Fail" --> T
+      R -- No Docs --> T
+      C -- Compression Fail --> T
     end
 ```
 
 ---
 
-## Stack
+## 🧰 Stack
 
 | Layer | Technology | Why |
 |-------|-----------|-----|
-| API | FastAPI | async, Pydantic validation |
-| Agent Orchestration | LangGraph | stateful decision-making, not a fixed chain |
-| Retrieval | BM25 (`rank_bm25`) + metadata filtering | keyword search + filter by year/author/topic |
-| Context Compression | LLMLingua 2 | 4–6× token reduction before LLM call |
-| Memory | Redis (dual-layer) | short-term MessagesState + long-term session store |
-| External Tools | MCP (arxiv API) | live paper search when local index is insufficient |
-| Vector Store | Qdrant (ready) | hybrid BM25 + dense retrieval at scale |
-| Observability | LangSmith + OpenTelemetry | full agent trace — latency, tokens, retrieval quality |
-| Deployment | Docker Compose | 4 services: app + worker + redis + qdrant |
+| 🌐 API | FastAPI | Async, Pydantic validation |
+| 🤖 Agent Orchestration | LangGraph | Stateful decision-making, not a fixed chain |
+| 🔍 Retrieval | BM25 (`rank_bm25`) + metadata filtering | Keyword search + filter by year/author/topic |
+| ✂️ Context Compression | LLMLingua 2 | 4–6× token reduction before LLM call |
+| 💾 Memory | Redis (dual-layer) | Short-term MessagesState + long-term session store |
+| 🛠️ External Tools | MCP (arxiv API) | Live paper search when local index is insufficient |
+| 📦 Vector Store | Qdrant (ready) | Hybrid BM25 + dense retrieval at scale |
+| 📊 Observability | LangSmith + OpenTelemetry | Full agent trace — latency, tokens, retrieval quality |
+| 🐳 Deployment | Docker Compose | 4 services: app + worker + redis + qdrant |
 
 ---
 
-## Quickstart
+## 🚀 Quickstart
+
+**Prerequisites:** Docker + Docker Compose, an OpenAI API key, a LangChain API key (for LangSmith tracing).
 
 ```bash
-# clone and configure
+# 1. Clone and configure
 git clone https://github.com/divyat2605/MemoryForge
 cd MemoryForge
 
+# 2. Set your keys
 cp .env.example .env
-# add OPENAI_API_KEY and LANGCHAIN_API_KEY to .env
+# → Add OPENAI_API_KEY and LANGCHAIN_API_KEY to .env
 
-# start all 4 services
+# 3. Start all 4 services
 docker compose up --build
 ```
 
-API available at `http://localhost:8000`
+API available at **`http://localhost:8000`** · Docs at **`http://localhost:8000/docs`**
 
-> **Note on first run:** LLMLingua model (~400MB) downloads on first startup. An extractive fallback kicks in automatically while it downloads — no code change needed.
+> ⚠️ **First run note:** The LLMLingua model (~400MB) downloads on first startup. An extractive fallback activates automatically in the meantime — no code change needed.
 
 ---
 
-## API Endpoints
+## 📡 API Endpoints
 
 ### `POST /ingest`
 Upload a research PDF, TXT, or MD for async indexing.
@@ -137,8 +167,10 @@ Upload a research PDF, TXT, or MD for async indexing.
 curl -X POST http://localhost:8000/ingest \
   -F "file=@attention_is_all_you_need.pdf"
 
-# returns: { "job_id": "abc123", "status": "queued" }
+# → { "job_id": "abc123", "status": "queued" }
 ```
+
+---
 
 ### `GET /ingest/status/{job_id}`
 Check ingestion progress.
@@ -146,11 +178,13 @@ Check ingestion progress.
 ```bash
 curl http://localhost:8000/ingest/status/abc123
 
-# returns: { "status": "done", "chunks": 42, "doc": "attention..." }
+# → { "status": "done", "chunks": 42, "doc": "attention..." }
 ```
 
+---
+
 ### `POST /query`
-Query the indexed documents. Pass `session_id` for multi-turn memory.
+Query indexed documents. Pass `session_id` for multi-turn memory.
 
 ```bash
 curl -X POST http://localhost:8000/query \
@@ -163,7 +197,7 @@ curl -X POST http://localhost:8000/query \
   }'
 ```
 
-Follow-up queries with the same `session_id` retain full conversation context.
+Follow-up queries with the same `session_id` retain full conversation context:
 
 ```bash
 # agent remembers the previous turn
@@ -171,12 +205,16 @@ curl -X POST http://localhost:8000/query \
   -d '{"query": "How does that compare to RNN?", "session_id": "my-session"}'
 ```
 
+---
+
 ### `GET /documents`
 List all indexed documents and their metadata.
 
 ```bash
 curl http://localhost:8000/documents
 ```
+
+---
 
 ### `DELETE /memory/{session_id}`
 Clear conversation history for a session.
@@ -187,57 +225,56 @@ curl -X DELETE http://localhost:8000/memory/my-session
 
 ---
 
-## Memory Layer
+## 🧠 Memory Layer
 
 MemoryForge uses a **dual-layer memory system** — Redis is already in `docker-compose`, so this is zero extra infra.
 
 | Layer | Implementation | Scope |
 |-------|---------------|-------|
-| Short-term | LangGraph `MessagesState` | last 6 turns, in-state per request |
-| Long-term | Redis, keyed by `session_id` | full history, 7-day TTL, survives restarts |
+| ⚡ Short-term | LangGraph `MessagesState` | Last 6 turns, in-state per request |
+| 🗄️ Long-term | Redis, keyed by `session_id` | Full history, 7-day TTL, survives restarts |
 
-Redis serves **two purposes in one service**: async ingestion job queue + session memory store.
+> Redis serves **two roles in one service**: async ingestion job queue + session memory store.
 
 ---
 
-## Observability
+## 📊 Observability
 
-Set these in `.env` — zero code changes needed:
+Add these to `.env` — zero code changes needed:
 
 ```env
 LANGCHAIN_TRACING_V2=true
 LANGCHAIN_API_KEY=your_key_here
 ```
 
-LangSmith automatically traces every LangGraph node (retrieve → compress → generate), capturing LLM token usage, per-query latency, and retrieval quality across all agent steps.
+LangSmith automatically traces every LangGraph node (`retrieve → compress → generate`), capturing LLM token usage, per-query latency, and retrieval quality across all agent steps.
 
 ---
 
-## Scaling to 1M+ Documents
+## 📈 Scaling to 1M+ Documents
 
-Current implementation uses in-memory BM25 (`rank_bm25`).
+Current implementation uses in-memory BM25 (`rank_bm25`). Here's the upgrade path:
 
 | Bottleneck | Current | At Scale |
 |------------|---------|----------|
-| Keyword search | `rank_bm25` (in-memory) | **Elasticsearch** — BM25 built-in, distributed, zero retrieval logic change |
-| Vector search | single Qdrant container | **Qdrant cluster** — hybrid BM25 + dense ANN |
-| API throughput | single FastAPI instance | `docker compose up --scale app=3` |
-| Ingestion speed | Redis queue (already async) | increase worker replicas |
-
+| 🔍 Keyword search | `rank_bm25` (in-memory) | **Elasticsearch** — BM25 built-in, distributed |
+| 📦 Vector search | Single Qdrant container | **Qdrant cluster** — hybrid BM25 + dense ANN |
+| 🌐 API throughput | Single FastAPI instance | `docker compose up --scale app=3` |
+| ⚙️ Ingestion speed | Redis queue (async) | Increase worker replicas |
 
 ---
 
-## Project Structure
+## 📁 Project Structure
 
 ```
 MemoryForge/
 ├── main.py              # FastAPI — /ingest /query /memory /documents
 ├── agent.py             # LangGraph state machine — retrieve → compress → generate
-├── memory.py            # dual-layer memory — LangGraph MessagesState + Redis
+├── memory.py            # Dual-layer memory — LangGraph MessagesState + Redis
 ├── retriever.py         # BM25 keyword search + metadata filtering
 ├── compressor.py        # LLMLingua context compression + extractive fallback
 ├── mcp_tools.py         # MCP tool definitions (arxiv search + paper fetch)
-├── ingestor.py          # doc chunking + auto metadata extraction
+├── ingestor.py          # Doc chunking + auto metadata extraction
 ├── queue_worker.py      # Redis async ingestion worker
 ├── monitoring.py        # LangSmith + OpenTelemetry tracing
 ├── Dockerfile
@@ -248,14 +285,18 @@ MemoryForge/
 └── README.md
 ```
 
-
-
 ---
 
-## License
+## 📄 License
 
 Licensed under the [Apache License 2.0](LICENSE).
 
 ---
 
-*Built by [Divya Tripathi](https://github.com/divyat2605)*
+<div align="center">
+
+Built with ❤️ by [Divya Tripathi](https://github.com/divyat2605)
+
+⭐ Star this repo if you found it useful!
+
+</div>
